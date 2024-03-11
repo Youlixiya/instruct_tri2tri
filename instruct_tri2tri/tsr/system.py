@@ -326,8 +326,9 @@ class InstructTri2Tri(BaseModule):
         return_scene_codes: bool = True,
         
     ) -> torch.FloatTensor:
-        tokens = self.forward_tsr(image, device, False)
-        text_encode = self.text_encoder(text, device)
+        with torch.no_grad():
+            tokens = self.forward_tsr(image, device, False)
+            text_encode = self.text_encoder(text, device)
         tokens = self.instruction_converter(
             tokens,
             encoder_hidden_states=text_encode,

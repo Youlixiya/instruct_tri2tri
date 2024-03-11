@@ -12,17 +12,16 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import Dataset, DataLoader
 from transformers import get_cosine_schedule_with_warmup, AutoProcessor, CLIPModel, CLIPProcessor
 from tensorboardX import SummaryWriter
-from triplane_clip import TriPlaneCLIPModel, TriPlaneCLIPConfig
 
 from torch import distributed as dist
-from accelerate import Accelerator
-from instruct_tri2tri.tsr.system import InstructTri2Tri
+from accelerate import Accelerator, DeepSpeedPlugin
+from instruct_tri2tri.tsr.system import InstructTri2Tri, TSR
 
 class InstructTri2TriDataset(Dataset):
     def __init__(self,
                  data_path):
         super().__init__()
-        datas = json.load(open(data_path))
+        datas = json.load(open(data_path))[:200]
         self.datas = datas
 
     def __len__(self):
@@ -31,14 +30,13 @@ class InstructTri2TriDataset(Dataset):
     def __getitem__(self, index):
         data = self.datas[index]
         image_name = data['image']
-        instruct_image_name = data['insturct_image']
+        instruct_image_name = data['instruct_image']
         image = Image.open(f'data/{image_name}')
         instruct_image = Image.open(f'data/{instruct_image_name}')
         # image_name = image_name.split('/')[-1]
         instruct = data['instruct']
         return image, instruct_image, instruct
         
-    
 def collate_fn(batch):
 
     images = []
@@ -56,13 +54,13 @@ def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
     # dataset paths
-    parser.add_argument('--dataset_path', type=str, default="data/objaverse/Cap3D_imgs_view0", help='root path of dataset')
+    parser.add_argument('--dataset_path', type=str, default="data/objaverse/cap3d_automated_objaverse_highquality_instruct_550k.json", help='root path of dataset')
     parser.add_argument('--model_path', type=str, default="instruct_tri2tri/tsr/instruct_tri2tri_config", help='root path of model')
 
     # training epochs, batch size and so on
-    parser.add_argument('--epochs', type=int, default=5, help='number of training epochs')
-    parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
-    parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
+    parser.add_argument('--epochs', type=int, default=1, help='number of training epochs')
+    parser.add_argument('--num_workers', type=int, default=4, help='num of workers to use')
+    parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
     parser.add_argument('--ckpt', type=str, default='', help='model pretrained ckpt')
 
     # multi gpu settings
@@ -78,7 +76,7 @@ def parse_option():
     parser.add_argument('--optim', type=str, default='adamw', choices=['adam', 'sgd', 'adamw'])
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='weight decay')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=2, help='gradient accumulation steps')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='gradient accumulation steps')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 
     # print and evaluate frequency during training
@@ -91,7 +89,7 @@ def parse_option():
     parser.add_argument('--work_dir', type=str, default="checkpoints", help='work directory')
     parser.add_argument('--save_dir', type=str, default="instruct_tri2tri", help='save directory')
     parser.add_argument('--log_dir', type=str, default="log", help='save directory')
-    parser.add_argument('--save_iters', type=int, default=10000, help='save iterations')
+    parser.add_argument('--save_iters', type=int, default=2000, help='save iterations')
 
     args = parser.parse_args()
     return args
@@ -109,7 +107,9 @@ def get_optimizer(args, model):
 if __name__ == "__main__":
     args = parse_option()
     torch.cuda.set_device(args.local_rank)
-    accelerator = Accelerator()
+    
+    deepspeed_plugin = DeepSpeedPlugin(zero_stage=2)
+    accelerator = Accelerator(mixed_precision='fp16',  deepspeed_plugin=deepspeed_plugin)
     device = accelerator.device
     # device = torch.device('cuda', args.local_rank)
     # dtype = torch.float32
@@ -132,28 +132,35 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.seed)
         cudnn.deterministic = args.deterministic
         cudnn.benchmark = args.benchmark
+    tsr = TSR.from_pretrained(
+        'stabilityai/TripoSR',
+        'config.yaml',
+        'model.ckpt'
+    )
     model = InstructTri2Tri.from_pretrained(
         args.model_path,
         'config.yaml',
         'model.ckpt'
     )
-    
-    model.instruction_converter.load_state_dict(model.backbone.state_dict())
-    
-    model.image_tokenizer.requires_grad_(False)
-    model.tokenizer.requires_grad_(False)
-    model.text_encoder.requires_grad_(False)
-    model.backbone.requires_grad_(False)
-    model.post_processor.requires_grad_(False)
-    model.decoder.requires_grad_(False)
-    model.renderer.requires_grad_(False)
+    model.load_state_dict(tsr.state_dict(), False)
+    del tsr
+    # model.instruction_converter.load_state_dict(model.backbone.state_dict())
+    model.requires_grad_(False)
+    model.instruction_converter.requires_grad_(True)
+    # model.image_tokenizer.requires_grad_(False)
+    # model.tokenizer.requires_grad_(False)
+    # model.text_encoder.requires_grad_(False)
+    # model.backbone.requires_grad_(False)
+    # model.post_processor.requires_grad_(False)
+    # model.decoder.requires_grad_(False)
+    # model.renderer.requires_grad_(False)
     
     train_dataset = InstructTri2TriDataset(args.dataset_path)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=collate_fn)
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=collate_fn)
     
     model.to(device=device)
-
-    optimizer = get_optimizer(args, model.vision_model.embeddings)
+    # model.half()
+    optimizer = get_optimizer(args, model.instruction_converter)
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
         num_warmup_steps=100,
@@ -162,7 +169,7 @@ if __name__ == "__main__":
     model, optimizer, lr_scheduler, train_loader = accelerator.prepare(model, optimizer, lr_scheduler, train_loader)
     loss_fn = torch.nn.MSELoss()
     total_iters = 0
-    
+    os.makedirs(os.path.join(args.root_path, args.work_dir), exist_ok=True)
     for epoch in range(1, args.epochs + 1):
         # new epoch
         # if args.local_rank == 0:
@@ -170,12 +177,17 @@ if __name__ == "__main__":
         # train_sampler.set_epoch(epoch)
         # training
         model.train()
+        
         for batch_idx, (images, instruct_images, instructs) in enumerate(train_loader):
             total_iters += 1
             samples = len(images)
-            target_tokens = model.forward_tsr(instruct_images, device, False)
-            pred_tokens = model(images, instruct_images, device, False)
-            loss = loss_fn(pred_tokens.reshape(samples, -1), target_tokens.reshape(samples, -1))
+
+            with torch.no_grad():
+                target_tokens = model.module.forward_tsr(instruct_images, device, False)
+            pred_tokens = model(images, instructs, device, False)
+            dim = target_tokens.shape[2]
+            index = torch.randint(0, pred_tokens.shape[1], (32, ))
+            loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:
                 optimizer.step()
