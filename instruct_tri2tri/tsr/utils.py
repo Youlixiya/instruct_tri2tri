@@ -24,6 +24,7 @@ def parse_structured(fields: Any, cfg: Optional[Union[dict, DictConfig]] = None)
 def find_class(cls_string):
     module_string = ".".join(cls_string.split(".")[:-1])
     cls_name = cls_string.split(".")[-1]
+    module_string = 'instruct_tri2tri.' + module_string
     module = importlib.import_module(module_string, package=None)
     cls = getattr(module, cls_name)
     return cls

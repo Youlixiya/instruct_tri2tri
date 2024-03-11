@@ -16,13 +16,11 @@ from triplane_clip import TriPlaneCLIPModel, TriPlaneCLIPConfig
 
 from torch import distributed as dist
 from accelerate import Accelerator
-from instruct_tri2tri.tsr.system import TSR, InstructTri2Tri
+from instruct_tri2tri.tsr.system import InstructTri2Tri
 
 class InstructTri2TriDataset(Dataset):
     def __init__(self,
-                 data_path,
-                 num_chunks,
-                 chunk_index):
+                 data_path):
         super().__init__()
         datas = json.load(open(data_path))
         self.datas = datas
@@ -36,33 +34,30 @@ class InstructTri2TriDataset(Dataset):
         instruct_image_name = data['insturct_image']
         image = Image.open(f'data/{image_name}')
         instruct_image = Image.open(f'data/{instruct_image_name}')
-        image_name = image_name.split('/')[-1]
+        # image_name = image_name.split('/')[-1]
         instruct = data['instruct']
         return image, instruct_image, instruct
         
     
-def collate_fn(batch, processor):
+def collate_fn(batch):
 
     images = []
-    texts = []
+    instruct_images = []
+    instructs = []
 
-    for image, text in batch:
+    for image, instruct_image, instruct in batch:
         images.append(image)
-        texts.append(text)
+        instruct_images.append(instruct_image)
+        instructs.append(instruct)
     
-    inputs = processor(text=texts,
-                       return_tensors="pt",
-                       padding=True,
-                       truncation=True)
-    inputs['images'] = images
-    
-    return inputs
+    return images, instruct_images, instructs
 
 def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
     # dataset paths
     parser.add_argument('--dataset_path', type=str, default="data/objaverse/Cap3D_imgs_view0", help='root path of dataset')
+    parser.add_argument('--model_path', type=str, default="instruct_tri2tri/tsr/instruct_tri2tri_config", help='root path of model')
 
     # training epochs, batch size and so on
     parser.add_argument('--epochs', type=int, default=5, help='number of training epochs')
@@ -93,8 +88,8 @@ def parse_option():
 
     # file and folder paths
     parser.add_argument('--root_path', type=str, default=".", help='root path')
-    parser.add_argument('--work_dir', type=str, default="work_dir", help='work directory')
-    parser.add_argument('--save_dir', type=str, default="ckpts", help='save directory')
+    parser.add_argument('--work_dir', type=str, default="checkpoints", help='work directory')
+    parser.add_argument('--save_dir', type=str, default="instruct_tri2tri", help='save directory')
     parser.add_argument('--log_dir', type=str, default="log", help='save directory')
     parser.add_argument('--save_iters', type=int, default=10000, help='save iterations')
 
@@ -110,15 +105,6 @@ def get_optimizer(args, model):
         return torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     else:
         raise NotImplementedError(args.optim)
-
-def get_scheduler(args, optimizer):
-    return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma = 0.5)
-
-def reduce_mean(tensor, nprocs):
-    rt = tensor.clone()
-    dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-    rt /= nprocs
-    return rt
     
 if __name__ == "__main__":
     args = parse_option()
@@ -146,45 +132,27 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.seed)
         cudnn.deterministic = args.deterministic
         cudnn.benchmark = args.benchmark
-    triplaneclip_config = TriPlaneCLIPConfig()
-    model = TriPlaneCLIPModel(triplaneclip_config)
-    clip = CLIPModel.from_pretrained("ckpts/clip-vit-large-patch14")
+    model = InstructTri2Tri.from_pretrained(
+        args.model_path,
+        'config.yaml',
+        'model.ckpt'
+    )
     
-    model.text_model = clip.text_model
-    model.visual_projection = clip.visual_projection
-    model.text_projection = clip.text_projection
-    model.vision_model.pre_layrnorm = clip.vision_model.pre_layrnorm
-    model.vision_model.encoder = clip.vision_model.encoder
-    model.vision_model.post_layernorm = clip.vision_model.post_layernorm
+    model.instruction_converter.load_state_dict(model.backbone.state_dict())
     
-    model.vision_model.pre_layrnorm.requires_grad_(False)
-    model.vision_model.encoder.requires_grad_(False)
-    model.vision_model.post_layernorm.requires_grad_(False)
-    model.text_model.requires_grad_(False)
-    model.image2triplane_model.requires_grad_(False)
-    model.visual_projection.requires_grad_(False)
-    model.text_projection.requires_grad_(False)
-    model.image2triplane_model.requires_grad_(False)
+    model.image_tokenizer.requires_grad_(False)
+    model.tokenizer.requires_grad_(False)
+    model.text_encoder.requires_grad_(False)
+    model.backbone.requires_grad_(False)
+    model.post_processor.requires_grad_(False)
+    model.decoder.requires_grad_(False)
+    model.renderer.requires_grad_(False)
     
-    del clip
-    
-    processor = CLIPProcessor.from_pretrained("ckpts/clip-vit-large-patch14")
-    # processor.tokenizer.add_tokens(['<ref>', '</ref>', '<box>', '</box>'], special_tokens=True)
-    # model.resize_token_embeddings(len(processor.tokenizer))
-    train_dataset = TriPlaneCLIPDataset(args.dataset_path)
-    # train_sampler = DistributedSampler(train_dataset)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=partial(collate_fn, processor=processor))
-    # if args.local_rank == 0:
-        # writer = SummaryWriter(os.path.join(args.root_path, args.work_dir, args.log_dir))
-    # model.vision_model.requires_grad_(False)
+    train_dataset = InstructTri2TriDataset(args.dataset_path)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=collate_fn)
     
     model.to(device=device)
-    clip_vision.to(device=device)
-    # model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
-    
-     # optimizer and scheduler
-    # optimizer = get_optimizer(args, model.module.vision_model)
+
     optimizer = get_optimizer(args, model.vision_model.embeddings)
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
@@ -202,69 +170,29 @@ if __name__ == "__main__":
         # train_sampler.set_epoch(epoch)
         # training
         model.train()
-        for batch_idx, inputs in enumerate(train_loader):
+        for batch_idx, (images, instruct_images, instructs) in enumerate(train_loader):
             total_iters += 1
-            samples = len(inputs['images'])
-            for key, value in inputs.items():
-                if type(value) == torch.Tensor:
-                    inputs[key] = value.to(device=device)
-                    # if key == 'pixel_values':
-                    #     clip_inputs[key] = value.to(device=device)
-                    # else:
-                    #     clip_inputs[key] = value.to(device=device)
-            data['return_loss'] = True
-            optimizer.zero_grad()
-            out = model(**inputs)
-            loss = out.loss
-            # print(loss.item())
-            # loss = reduce_mean(output.loss, dist.get_world_size())
-            # loss.backward()
+            samples = len(images)
+            target_tokens = model.forward_tsr(instruct_images, device, False)
+            pred_tokens = model(images, instruct_images, device, False)
+            loss = loss_fn(pred_tokens.reshape(samples, -1), target_tokens.reshape(samples, -1))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-                accelerator.print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLM Loss: {:.6f}'.format(
+                accelerator.print('Train Epoch: {} [{}/{} ({:.0f}%)]\tMSE Loss: {:.6f}'.format(
                     epoch, batch_idx // args.gradient_accumulation_steps, len(train_loader) // args.gradient_accumulation_steps,
                         100. * batch_idx / len(train_loader), loss.item()))
-            # optimizer.step()
-            
-            # if is master process
-            # if args.local_rank == 0:
-            # print training info
-            # if (batch_idx + 1) % args.print_iters == 0:
-                # accelerator.print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLM Loss: {:.6f}'.format(
-                #     epoch, batch_idx * samples * dist.get_world_size(), len(train_loader.dataset),
-                #         100. * batch_idx / len(train_loader), loss.item()))
-                # writer.add_scalar("LM loss", loss.item(), total_iters)
             
             # save model
-            if (total_iters // args.gradient_accumulation_steps) % args.save_iters == 0:
-                # save_path = os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_" + str(total_iters) + ".pth")
-                save_path = os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_" + str(total_iters))
+            if total_iters % (args.save_iters * args.gradient_accumulation_steps) == 0 and total_iters != 0:
+                save_path = os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_" + str(total_iters) + '.ckpt')
                 accelerator.print("save model to {}".format(save_path))
-                # torch.save(model.module.state_dict(), save_path)
-                accelerator.unwrap_model(model).save_pretrained(save_path)
-                processor.save_pretrained(save_path)
+                unwrap_model = accelerator.unwrap_model(model)
+                torch.save(unwrap_model.state_dict(), save_path)
 
-                # evaluation
-                '''
-                if total_iters % args.eval_iters == 0:
-                    test_loss = test(args, model, val_loader)
-                    print('\nTest set: Average loss: {:.4f}\n'.format(test_loss))
-                    writer.add_scalar("eval_mse_loss", test_loss, total_iters)
-                '''
-
-        # dist.barrier()
-        # scheduler.step()
-
-    # save final model
-    # if args.local_rank == 0:
-        # torch.save(model.module.state_dict(), os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_final.pth"))
-        # model.module.save_pretrained(os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_final.pth"))
-    accelerator.unwrap_model(model).save_pretrained(os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_final"))
-    processor.save_pretrained(os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_final"))
-    # writer.close()
-
+    unwrap_model = accelerator.unwrap_model(model)
+    torch.save(unwrap_model.state_dict(), os.path.join(args.root_path, args.work_dir, args.save_dir, "iter_final.ckpt"))
     
     
