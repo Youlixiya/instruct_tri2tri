@@ -36,14 +36,14 @@ class Instruct2ImageDataset(Dataset):
         image_name = data['image']
         image = Image.open(f'data/{image_name}')
         image_name = image_name.split('/')[-1]
-        caption = data['caption']
-        return image_name, image, caption
+        instruct = data['instruct']
+        return image_name, image, instruct
 
 def parse_option():
     parser = argparse.ArgumentParser('argument for training')
 
     # dataset paths
-    parser.add_argument('--dataset_path', type=str, default="data/objaverse/cap3d_automated_objaverse_highquality_550k.json", help='root path of dataset')
+    parser.add_argument('--dataset_path', type=str, default="data/objaverse/cap3d_automated_objaverse_highquality_instruct_550k.json", help='root path of dataset')
     parser.add_argument('--save_path', type=str, default="data/objaverse/instruct_images", help='root path of dataset')
     # multi gpu settings
     parser.add_argument("--local-rank", type=int, default=-1)
@@ -72,7 +72,7 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.seed)
         cudnn.deterministic = args.deterministic
         cudnn.benchmark = args.benchmark
-    model_id = "timbrooks/instruct-pix2pix"
+    model_id = "ckpts/instruct-pix2pix"
     pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(model_id, torch_dtype=torch.float16, safety_checker=None)
     pipe.to("cuda")
     pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
@@ -80,14 +80,14 @@ if __name__ == "__main__":
     train_dataset = Instruct2ImageDataset(args.dataset_path, args.num_chunks, args.chunk_index)
     rembg_session = rembg.new_session()
     os.makedirs(args.save_path, exist_ok=True)
-    for image_name, image, caption in tqdm(train_dataset):
-        image = pipe(caption, image=image, num_inference_steps=10, image_guidance_scale=1).images[0]
+    for image_name, image, instruct in tqdm(train_dataset):
+        image = pipe(instruct, image=image, num_inference_steps=10, image_guidance_scale=1).images[0]
         image = remove_background(image, rembg_session)
-        image = resize_foreground(image, args.foreground_ratio)
+        image = resize_foreground(image, 0.85)
         image = np.array(image).astype(np.float32) / 255.0
         image = image[:, :, :3] * image[:, :, 3:4] + (1 - image[:, :, 3:4]) * 0.5
         image = Image.fromarray((image * 255.0).astype(np.uint8))
-        image.save(f'{args.save_path}/{image_name}')
+        image.save(f'{args.save_path}/{image_name}.jpg')
 
     
     
