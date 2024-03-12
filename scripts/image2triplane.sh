@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1,2,4,5 accelerate launch --main_process_port=24999 --num_processes 4 --mixed_precision fp16 image2triplane.py
