@@ -11,7 +11,7 @@ tokenizer:
 
 text_encoder_cls: tsr.models.tokenizers.text.CLIPTextEncoder
 text_encoder:
-  pretrained_model_name_or_path: "ckpts/clip-vit-large-patch14"
+  pretrained_model_name_or_path: "openai/clip-vit-large-patch14"
 
 backbone_cls: tsr.models.transformer.transformer_1d.Transformer1D
 backbone:
@@ -26,7 +26,7 @@ instruction_converter:
   in_channels: ${tokenizer.num_channels}
   num_attention_heads: 16
   attention_head_dim: 64
-  num_layers: 2
+  num_layers: 1
   cross_attention_dim: 768
 
 post_processor_cls: tsr.models.network_utils.TriplaneUpsampleNetwork

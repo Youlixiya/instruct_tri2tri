@@ -10,7 +10,7 @@ from functools import partial
 import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.data import Dataset, DataLoader
-from transformers import get_cosine_schedule_with_warmup, AutoProcessor, CLIPModel, CLIPProcessor
+from transformers import get_cosine_schedule_with_warmup, AutoTokenizer, CLIPTextModelWithProjection
 from tensorboardX import SummaryWriter
 
 from torch import distributed as dist
@@ -59,7 +59,7 @@ def parse_option():
 
     # training epochs, batch size and so on
     parser.add_argument('--epochs', type=int, default=1, help='number of training epochs')
-    parser.add_argument('--num_workers', type=int, default=4, help='num of workers to use')
+    parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
     parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
     parser.add_argument('--ckpt', type=str, default='', help='model pretrained ckpt')
 
@@ -108,8 +108,8 @@ if __name__ == "__main__":
     args = parse_option()
     torch.cuda.set_device(args.local_rank)
     
-    deepspeed_plugin = DeepSpeedPlugin(zero_stage=2)
-    accelerator = Accelerator(mixed_precision='fp16',  deepspeed_plugin=deepspeed_plugin)
+    # deepspeed_plugin = DeepSpeedPlugin(zero_stage=2)
+    accelerator = Accelerator(mixed_precision='fp16')
     device = accelerator.device
     # device = torch.device('cuda', args.local_rank)
     # dtype = torch.float32
@@ -132,6 +132,12 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.seed)
         cudnn.deterministic = args.deterministic
         cudnn.benchmark = args.benchmark
+        
+    # clip_text_encoder = CLIPTextModelWithProjection.from_pretrained(
+    #         "openai/clip-vit-large-patch14")
+    # clip_text_encoder.requires_grad_(False)
+    # tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+    
     tsr = TSR.from_pretrained(
         'stabilityai/TripoSR',
         'config.yaml',
@@ -166,6 +172,7 @@ if __name__ == "__main__":
         num_warmup_steps=100,
         num_training_steps=(len(train_loader) * args.epochs) // args.gradient_accumulation_steps,
     )
+    # model, clip_text_encoder, optimizer, lr_scheduler, train_loader = accelerator.prepare(model, clip_text_encoder, optimizer, lr_scheduler, train_loader)
     model, optimizer, lr_scheduler, train_loader = accelerator.prepare(model, optimizer, lr_scheduler, train_loader)
     loss_fn = torch.nn.MSELoss()
     total_iters = 0
@@ -181,13 +188,20 @@ if __name__ == "__main__":
         for batch_idx, (images, instruct_images, instructs) in enumerate(train_loader):
             total_iters += 1
             samples = len(images)
-
+            torch.cuda.empty_cache()
             with torch.no_grad():
-                target_tokens = model.module.forward_tsr(instruct_images, device, False)
+                # inputs = tokenizer(instructs, padding=True, return_tensors='pt')
+                # for key, value in inputs.items():
+                #     inputs[key] = value.cuda()
+                # text_embeddings = clip_text_encoder(**inputs).text_embeds
+                # target_tokens = model.module.forward_tsr(instruct_images, device, False)
+                target_tokens = model.forward_tsr(instruct_images, device, False)
+            
             pred_tokens = model(images, instructs, device, False)
             dim = target_tokens.shape[2]
-            index = torch.randint(0, pred_tokens.shape[1], (32, ))
-            loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
+            # index = torch.randint(0, pred_tokens.shape[1], (32, ))
+            loss = loss_fn(pred_tokens.reshape(-1, dim), target_tokens.reshape(-1, dim))
+            # loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:
                 optimizer.step()

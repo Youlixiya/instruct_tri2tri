@@ -21,6 +21,7 @@ from .utils import (
     get_spherical_cameras,
     scale_tensor,
 )
+from instruct_tri2tri.tsr.models.tokenizers.text import CLIPTextEncoder
 
 
 class TSR(BaseModule):
@@ -263,6 +264,7 @@ class InstructTri2Tri(BaseModule):
         )
         self.tokenizer = find_class(self.cfg.tokenizer_cls)(self.cfg.tokenizer)
         self.text_encoder = find_class(self.cfg.text_encoder_cls)(self.cfg.text_encoder)
+        # self.text_encoder = CLIPTextEncoder()
         self.backbone = find_class(self.cfg.backbone_cls)(self.cfg.backbone)
         self.instruction_converter = find_class(self.cfg.instruction_converter_cls)(self.cfg.instruction_converter)
         self.post_processor = find_class(self.cfg.post_processor_cls)(
@@ -338,6 +340,32 @@ class InstructTri2Tri(BaseModule):
             return scene_codes
         else:
             return tokens
+    
+    # def forward(
+    #     self,
+    #     image: Union[
+    #         PIL.Image.Image,
+    #         np.ndarray,
+    #         torch.FloatTensor,
+    #         List[PIL.Image.Image],
+    #         List[np.ndarray],
+    #         List[torch.FloatTensor],
+    #     ],
+    #     text_embeddings: torch.FloatTensor,
+    #     device: str,
+    #     return_scene_codes: bool = True,
+        
+    # ) -> torch.FloatTensor:
+    #     tokens = self.forward_tsr(image, device, False)
+    #     tokens = self.instruction_converter(
+    #         tokens,
+    #         encoder_hidden_states=text_embeddings,
+    #     )
+    #     if return_scene_codes:
+    #         scene_codes = self.post_processor(self.tokenizer.detokenize(tokens))
+    #         return scene_codes
+    #     else:
+    #         return tokens
 
     def render(
         self,

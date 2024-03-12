@@ -28,7 +28,7 @@ class DINOSingleImageTokenizer(BaseModule):
         )
 
         if self.cfg.enable_gradient_checkpointing:
-            self.model.encoder.gradient_checkpointing = True
+            self.model.encoder.gradient_checkpointing = False
 
         self.register_buffer(
             "image_mean",
