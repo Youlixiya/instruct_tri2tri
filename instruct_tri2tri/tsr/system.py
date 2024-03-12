@@ -325,47 +325,18 @@ class InstructTri2Tri(BaseModule):
         ],
         text: List[str],
         device: str,
-        return_scene_codes: bool = True,
         
     ) -> torch.FloatTensor:
         with torch.no_grad():
-            tokens = self.forward_tsr(image, device, False)
+            scene_codes = self.forward_tsr(image, device, True)
             text_encode = self.text_encoder(text, device)
-        tokens = self.instruction_converter(
-            tokens,
+        b, n, c, h, w = scene_codes.shape
+        scene_codes = scene_codes.reshape(b, n * c, h * w)
+        scene_codes = self.instruction_converter(
+            scene_codes,
             encoder_hidden_states=text_encode,
         )
-        if return_scene_codes:
-            scene_codes = self.post_processor(self.tokenizer.detokenize(tokens))
-            return scene_codes
-        else:
-            return tokens
-    
-    # def forward(
-    #     self,
-    #     image: Union[
-    #         PIL.Image.Image,
-    #         np.ndarray,
-    #         torch.FloatTensor,
-    #         List[PIL.Image.Image],
-    #         List[np.ndarray],
-    #         List[torch.FloatTensor],
-    #     ],
-    #     text_embeddings: torch.FloatTensor,
-    #     device: str,
-    #     return_scene_codes: bool = True,
-        
-    # ) -> torch.FloatTensor:
-    #     tokens = self.forward_tsr(image, device, False)
-    #     tokens = self.instruction_converter(
-    #         tokens,
-    #         encoder_hidden_states=text_embeddings,
-    #     )
-    #     if return_scene_codes:
-    #         scene_codes = self.post_processor(self.tokenizer.detokenize(tokens))
-    #         return scene_codes
-    #     else:
-    #         return tokens
+        return scene_codes.reshape(b, n, c, h, w)
 
     def render(
         self,
