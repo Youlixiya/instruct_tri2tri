@@ -403,14 +403,14 @@ def train(attn_implementation=None):
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
         attn_implementation=attn_implementation,
-        torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+        torch_dtype=compute_dtype,
         **bnb_model_from_pretrained_args
     )
     model.config.use_cache = False
     
     if training_args.bits in [4, 8]:
         from peft import prepare_model_for_kbit_training
-        model.config.torch_dtype=(torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
+        model.config.torch_dtype=compute_dtype
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training_args.gradient_checkpointing)
 
     if training_args.gradient_checkpointing:
