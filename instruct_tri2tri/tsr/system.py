@@ -325,18 +325,28 @@ class InstructTri2Tri(BaseModule):
         ],
         text: List[str],
         device: str,
+        return_scene_codes: bool = True
         
     ) -> torch.FloatTensor:
         with torch.no_grad():
-            scene_codes = self.forward_tsr(image, device, True)
+            # scene_codes = self.forward_tsr(image, device, True)
+            tokens = self.forward_tsr(image, device, False)
             text_encode = self.text_encoder(text, device)
-        b, n, c, h, w = scene_codes.shape
-        scene_codes = scene_codes.reshape(b, n * c, h * w)
-        scene_codes = self.instruction_converter(
-            scene_codes,
+        # b, n, c, h, w = scene_codes.shape
+        # scene_codes = scene_codes.reshape(b, n * c, h * w)
+        # scene_codes = self.instruction_converter(
+        #     scene_codes,
+        #     encoder_hidden_states=text_encode,
+        # )
+        tokens = self.instruction_converter(
+            tokens,
             encoder_hidden_states=text_encode,
         )
-        return scene_codes.reshape(b, n, c, h, w)
+        if return_scene_codes:
+            scene_codes = self.post_processor(self.tokenizer.detokenize(tokens))
+            return scene_codes
+        else:
+            return tokens
 
     def render(
         self,

@@ -23,10 +23,10 @@ backbone:
 
 instruction_converter_cls: tsr.models.transformer.transformer_1d.Transformer1D
 instruction_converter:
-  in_channels: 120
-  num_attention_heads: 12
-  attention_head_dim: 10
-  norm_num_groups: 12
+  in_channels: ${tokenizer.num_channels}
+  num_attention_heads: 16
+  attention_head_dim: 64
+  # norm_num_groups: 12
   num_layers: 16
   cross_attention_dim: 768
 

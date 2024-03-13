@@ -29,6 +29,7 @@ class Image2Triplane(Dataset):
         data = self.datas[index]
         image_name = data['image']
         image_name = f'data/{image_name}'
+        instruct_image_name = data['instruct_image']
         instruct_image_name = f'data/{instruct_image_name}'
         image = Image.open(image_name)
         instruct_image = Image.open(instruct_image_name)
@@ -92,16 +93,6 @@ def parse_option():
 
     args = parser.parse_args()
     return args
-
-def get_optimizer(args, model):
-    if args.optim == 'adam':
-        return torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    elif args.optim == 'sgd':
-        return torch.optim.SGD(model.parameters(), lr=args.learning_rate, momentum=args.momentum, weight_decay=args.weight_decay)
-    elif args.optim == 'adamw':
-        return torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    else:
-        raise NotImplementedError(args.optim)
     
 if __name__ == "__main__":
     args = parse_option()
@@ -145,11 +136,16 @@ if __name__ == "__main__":
     instruct_triplane_save_path = 'data/objaverse/instruct_triplanes'
     os.makedirs(triplane_save_path, exist_ok=True)
     os.makedirs(instruct_triplane_save_path, exist_ok=True)
-    for images, instruct_images, image_names, instruct_names in tqdm(train_loader):
-        with torch.no_grad():
-            triplane = model(images, device)
-            insturct_triplnae = model(instruct_images, device)
-            triplane_names = image_names.replace('images', 'triplanes').replace('jpg', 'pt')
-            instruct_triplane_names = image_names.replace('images', 'instruct_triplanes').replace('jpg', 'pt')
-            torch.save(triplane.cpu(), triplane_names)
-            torch.save(insturct_triplnae.cpu(), instruct_triplane_names)
+    for images, instruct_images, image_names, instruct_image_names in tqdm(train_loader):
+        for i in range(len(images)):
+            image = images[i] 
+            instruct_image = instruct_images[i] 
+            image_name = image_names[i] 
+            instruct_image_name = instruct_image_names[i] 
+            with torch.no_grad():
+                triplane = model([image], device).cpu()
+                insturct_triplnae = model([instruct_image], device).cpu()
+                triplane_name = image_name.replace('images', 'triplanes').replace('jpg', 'pt')
+                instruct_triplane_name = instruct_image_name.replace('instruct_images', 'instruct_triplanes').replace('jpg', 'pt')
+                torch.save(triplane, triplane_name)
+                torch.save(insturct_triplnae, instruct_triplane_name)

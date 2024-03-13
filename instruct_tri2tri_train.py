@@ -21,7 +21,7 @@ class InstructTri2TriDataset(Dataset):
     def __init__(self,
                  data_path):
         super().__init__()
-        datas = json.load(open(data_path))[:200]
+        datas = json.load(open(data_path))
         self.datas = datas
 
     def __len__(self):
@@ -59,7 +59,7 @@ def parse_option():
 
     # training epochs, batch size and so on
     parser.add_argument('--epochs', type=int, default=1, help='number of training epochs')
-    parser.add_argument('--num_workers', type=int, default=0, help='num of workers to use')
+    parser.add_argument('--num_workers', type=int, default=4, help='num of workers to use')
     parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
     parser.add_argument('--ckpt', type=str, default='', help='model pretrained ckpt')
 
@@ -76,7 +76,7 @@ def parse_option():
     parser.add_argument('--optim', type=str, default='adamw', choices=['adam', 'sgd', 'adamw'])
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='weight decay')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='gradient accumulation steps')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=16, help='gradient accumulation steps')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 
     # print and evaluate frequency during training
@@ -197,15 +197,15 @@ if __name__ == "__main__":
                 #     inputs[key] = value.cuda()
                 # text_embeddings = clip_text_encoder(**inputs).text_embeds
                 # target_tokens = model.module.forward_tsr(instruct_images, device, False)
-                target_tokens = model.forward_tsr(instruct_images, device)
+                target_tokens = model.module.forward_tsr(instruct_images, device, False)
             
-            pred_tokens = model(images, instructs, device)
-            b, n, c, h, w = target_tokens.shape
-            pred_tokens = pred_tokens.permute(0, 3, 4, 1, 2).reshape(b*h*w, n*c)
-            target_tokens = target_tokens.permute(0, 3, 4, 1, 2).reshape(b*h*w, n*c)
+            pred_tokens = model(images, instructs, device, False)
+            # b, n, c, h, w = target_tokens.shape
+            # pred_tokens = pred_tokens.permute(0, 3, 4, 1, 2).reshape(b*h*w, n*c)
+            # target_tokens = target_tokens.permute(0, 3, 4, 1, 2).reshape(b*h*w, n*c)
             # index = torch.randint(0, pred_tokens.shape[1], (32, ))
             # loss = loss_fn(pred_tokens.reshape(-1, dim), target_tokens.reshape(-1, dim))
-            loss = custom_mse(pred_tokens, target_tokens)
+            loss = loss_fn(pred_tokens, target_tokens)
             # loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:
