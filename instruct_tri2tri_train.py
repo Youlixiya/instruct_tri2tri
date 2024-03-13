@@ -94,6 +94,8 @@ def parse_option():
     args = parser.parse_args()
     return args
 
+def custom_mse(pred, target):
+    return ((target-pred)**2).sum(-1).mean()
 def get_optimizer(args, model):
     if args.optim == 'adam':
         return torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -153,16 +155,16 @@ if __name__ == "__main__":
     # model.instruction_converter.load_state_dict(model.backbone.state_dict())
     model.requires_grad_(False)
     model.instruction_converter.requires_grad_(True)
-    # model.image_tokenizer.requires_grad_(False)
-    # model.tokenizer.requires_grad_(False)
-    # model.text_encoder.requires_grad_(False)
-    # model.backbone.requires_grad_(False)
-    # model.post_processor.requires_grad_(False)
-    # model.decoder.requires_grad_(False)
-    # model.renderer.requires_grad_(False)
+    model.image_tokenizer.requires_grad_(False)
+    model.tokenizer.requires_grad_(False)
+    model.text_encoder.requires_grad_(False)
+    model.backbone.requires_grad_(False)
+    model.post_processor.requires_grad_(False)
+    model.decoder.requires_grad_(False)
+    model.renderer.requires_grad_(False)
     
     train_dataset = InstructTri2TriDataset(args.dataset_path)
-    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=collate_fn)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=collate_fn)
     
     model.to(device=device)
     # model.half()
@@ -195,12 +197,15 @@ if __name__ == "__main__":
                 #     inputs[key] = value.cuda()
                 # text_embeddings = clip_text_encoder(**inputs).text_embeds
                 # target_tokens = model.module.forward_tsr(instruct_images, device, False)
-                target_tokens = model.forward_tsr(instruct_images, device, False)
+                target_tokens = model.forward_tsr(instruct_images, device)
             
-            pred_tokens = model(images, instructs, device, False)
-            dim = target_tokens.shape[2]
+            pred_tokens = model(images, instructs, device)
+            b, n, c, h, w = target_tokens.shape
+            pred_tokens = pred_tokens.permute(0, 3, 4, 1, 2).reshape(b*h*w, n*c)
+            target_tokens = target_tokens.permute(0, 3, 4, 1, 2).reshape(b*h*w, n*c)
             # index = torch.randint(0, pred_tokens.shape[1], (32, ))
-            loss = loss_fn(pred_tokens.reshape(-1, dim), target_tokens.reshape(-1, dim))
+            # loss = loss_fn(pred_tokens.reshape(-1, dim), target_tokens.reshape(-1, dim))
+            loss = custom_mse(pred_tokens, target_tokens)
             # loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:
