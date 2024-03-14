@@ -62,7 +62,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--latent_image_tokenizer_ckpt_path",
-    default="checkpoints/latent_image_tokenizer.ckpt",
+    default="checkpoints/instruct_tri2tri/latent_image_tokenizer.ckpt",
     type=str,
     help="Path to the pretrained model. Could be either a huggingface model id is or a local path. Default: 'stabilityai/TripoSR'",
 )
@@ -156,7 +156,7 @@ for i, image in enumerate(images):
     timer.start("Running model")
     with torch.no_grad():
         image_pt = image_preprocessor(images, 512).permute(0, 3, 1, 2).to(device)
-        input_image_tokens = latent_image_tokenizer(image_pt)
+        input_image_tokens = latent_image_tokenizer(image_pt).unsqueeze(1)
         scene_codes = model(input_image_tokens=input_image_tokens, device=device)
     timer.end("Running model")
 

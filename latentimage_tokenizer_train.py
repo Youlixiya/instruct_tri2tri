@@ -180,7 +180,8 @@ if __name__ == "__main__":
             with torch.no_grad():
                 target_tokens = image_tokenier(image_pt)
             pred_tokens = model(image_pt)
-            loss = loss_fn(pred_tokens, target_tokens)
+            dim = pred_tokens.shape[1]
+            loss = loss_fn(pred_tokens.permute(0, 2, 1).reshape(-1, dim), target_tokens.permute(0, 2, 1).reshape(-1, dim))
             # loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:

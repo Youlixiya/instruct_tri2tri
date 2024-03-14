@@ -107,7 +107,7 @@ class TSR(BaseModule):
             input_image_tokens: torch.Tensor = self.image_tokenizer(
                 rearrange(rgb_cond, "B Nv H W C -> B Nv C H W", Nv=1),
             )
-
+        batch_size = input_image_tokens.shape[0]
         input_image_tokens = rearrange(
             input_image_tokens, "B Nv C Nt -> B (Nv Nt) C", Nv=1
         )
