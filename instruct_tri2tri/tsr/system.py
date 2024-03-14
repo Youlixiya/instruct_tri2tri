@@ -1,7 +1,7 @@
 import math
 import os
 from dataclasses import dataclass, field
-from typing import List, Union
+from typing import List, Union, Optional
 
 import numpy as np
 import PIL.Image
@@ -94,17 +94,19 @@ class TSR(BaseModule):
             List[PIL.Image.Image],
             List[np.ndarray],
             List[torch.FloatTensor],
-        ],
-        device: str,
+        ] = None,
+        input_image_tokens: torch.Tensor = None,
+        device: str = 'cpu'
     ) -> torch.FloatTensor:
-        rgb_cond = self.image_processor(image, self.cfg.cond_image_size)[:, None].to(
-            device
-        )
-        batch_size = rgb_cond.shape[0]
+        if input_image_tokens is None:
+            rgb_cond = self.image_processor(image, self.cfg.cond_image_size)[:, None].to(
+                device
+            )
+            batch_size = rgb_cond.shape[0]
 
-        input_image_tokens: torch.Tensor = self.image_tokenizer(
-            rearrange(rgb_cond, "B Nv H W C -> B Nv C H W", Nv=1),
-        )
+            input_image_tokens: torch.Tensor = self.image_tokenizer(
+                rearrange(rgb_cond, "B Nv H W C -> B Nv C H W", Nv=1),
+            )
 
         input_image_tokens = rearrange(
             input_image_tokens, "B Nv C Nt -> B (Nv Nt) C", Nv=1
