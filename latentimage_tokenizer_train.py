@@ -14,7 +14,7 @@ from transformers import get_cosine_schedule_with_warmup
 from tensorboardX import SummaryWriter
 
 from torch import distributed as dist
-from accelerate import Accelerator, DeepSpeedPlugin
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from instruct_tri2tri.tsr.system import InstructTri2Tri, TSR
 from PIL import Image
 from instruct_tri2tri.tsr.utils import (
@@ -57,7 +57,7 @@ def parse_option():
     # training epochs, batch size and so on
     parser.add_argument('--epochs', type=int, default=1, help='number of training epochs')
     parser.add_argument('--num_workers', type=int, default=4, help='num of workers to use')
-    parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
+    parser.add_argument('--batch_size', type=int, default=8, help='batch_size')
     parser.add_argument('--ckpt', type=str, default='', help='model pretrained ckpt')
 
     # multi gpu settings
@@ -71,9 +71,9 @@ def parse_option():
 
     # learning process settings
     parser.add_argument('--optim', type=str, default='adamw', choices=['adam', 'sgd', 'adamw'])
-    parser.add_argument('--learning_rate', type=float, default=2e-5, help='learning rate')
+    parser.add_argument('--learning_rate', type=float, default=2e-4, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='weight decay')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=16, help='gradient accumulation steps')
+    parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='gradient accumulation steps')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 
     # print and evaluate frequency during training
@@ -86,7 +86,7 @@ def parse_option():
     parser.add_argument('--work_dir', type=str, default="checkpoints", help='work directory')
     parser.add_argument('--save_dir', type=str, default="instruct_tri2tri", help='save directory')
     parser.add_argument('--log_dir', type=str, default="log", help='save directory')
-    parser.add_argument('--save_iters', type=int, default=2000, help='save iterations')
+    parser.add_argument('--save_iters', type=int, default=4000, help='save iterations')
 
     args = parser.parse_args()
     return args
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     torch.cuda.set_device(args.local_rank)
     
     # deepspeed_plugin = DeepSpeedPlugin(zero_stage=2)
-    accelerator = Accelerator(mixed_precision='fp16')
+    accelerator = Accelerator(mixed_precision='fp16', kwargs_handlers=[DistributedDataParallelKwargs(find_unused_parameters=True)])
     device = accelerator.device
     # device = torch.device('cuda', args.local_rank)
     # dtype = torch.float32
@@ -152,6 +152,7 @@ if __name__ == "__main__":
     train_dataset = LatentImageTokenizerDataset(args.dataset_path)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, drop_last=True, collate_fn=collate_fn)
     model.to(device=device)
+    image_tokenier.to(device=device)
     # model.half()
     optimizer = get_optimizer(args, model.model)
     lr_scheduler = get_cosine_schedule_with_warmup(
@@ -175,10 +176,9 @@ if __name__ == "__main__":
         for batch_idx, images in enumerate(train_loader):
             total_iters += 1
             samples = len(images)
-            image_pt = image_preprocessor(images, 512)
+            image_pt = image_preprocessor(images, 512).permute(0, 3, 1, 2).to(device)
             with torch.no_grad():
                 target_tokens = image_tokenier(image_pt)
-            
             pred_tokens = model(image_pt)
             loss = loss_fn(pred_tokens, target_tokens)
             # loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))

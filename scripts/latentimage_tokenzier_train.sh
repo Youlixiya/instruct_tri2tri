@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1,3,5,6 accelerate launch --main_process_port=24999 --multi_gpu --num_processes 4 --mixed_precision fp16 latentimage_tokenizer_train.py
