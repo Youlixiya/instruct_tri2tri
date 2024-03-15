@@ -1,4 +1,4 @@
-python instruct_tri2tri_run.py examples/teapot.png --output-dir output --exp teapot --render
+python instruct_tri2tri_run.py examples/teapot.png --output-dir output --exp teapot --prompt "turn the teapot green" --render
 python instruct_tri2tri_run.py examples/robot.png --output-dir output --exp robot --prompt "turn the robot into a dog" --render
 
 
