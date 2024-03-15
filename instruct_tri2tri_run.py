@@ -8,6 +8,9 @@ import rembg
 import torch
 from PIL import Image
 
+from diffusers import EulerAncestralDiscreteScheduler, AutoencoderKL
+
+from instruct_tri2tri.tsr.pipeline_stable_diffusion_instruct_pix2pix import StableDiffusionInstructPix2PixPipeline
 from instruct_tri2tri.tsr.system import TSR
 from instruct_tri2tri.tsr.utils import (
     remove_background,
@@ -64,7 +67,19 @@ parser.add_argument(
     "--latent_image_tokenizer_ckpt_path",
     default="checkpoints/instruct_tri2tri/latent_image_tokenizer.ckpt",
     type=str,
-    help="Path to the pretrained model. Could be either a huggingface model id is or a local path. Default: 'stabilityai/TripoSR'",
+    help="Path to the latent image tokenizer model",
+)
+parser.add_argument(
+    "--instruct_pix2pix_path",
+    default="ckpts/instruct-pix2pix",
+    type=str,
+    help="Path to the instruct-pix2pix pipeline",
+)
+parser.add_argument(
+    "--prompt",
+    default="add some pattern to the teapot",
+    type=str,
+    help="instruct prompt",
 )
 parser.add_argument(
     "--chunk-size",
@@ -85,9 +100,15 @@ parser.add_argument(
 )
 parser.add_argument(
     "--output-dir",
-    default="output/",
+    default="output",
     type=str,
     help="Output directory to save the results. Default: 'output/'",
+)
+parser.add_argument(
+    "--exp",
+    default="exp",
+    type=str,
+    help="Output directory to save the results. Default: 'output/exp'",
 )
 parser.add_argument(
     "--model-save-format",
@@ -104,6 +125,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 output_dir = args.output_dir
+exp = args.exp
+output_dir = os.path.join(output_dir, exp)
 os.makedirs(output_dir, exist_ok=True)
 
 device = args.device
@@ -116,13 +139,17 @@ latent_image_tokenizer_cls = "tsr.models.tokenizers.latentimage.DINOLatentImageT
 latent_image_tokenizer_dict = {}
 latent_image_tokenizer = find_class(latent_image_tokenizer_cls)(latent_image_tokenizer_dict)
 latent_image_tokenizer.load_state_dict(torch.load(args.latent_image_tokenizer_ckpt_path))
+del latent_image_tokenizer.vae
 latent_image_tokenizer.to(device)
+pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(args.instruct_pix2pix_path, torch_dtype=torch.float16, safety_checker=None)
+pipe.to(device)
 model = TSR.from_pretrained(
     args.pretrained_model_name_or_path,
     config_name="config.yaml",
     weight_name="model.ckpt",
 )
 model.renderer.set_chunk_size(args.chunk_size)
+del model.image_tokenizer
 model.to(device)
 timer.end("Initializing model")
 
@@ -155,8 +182,13 @@ for i, image in enumerate(images):
 
     timer.start("Running model")
     with torch.no_grad():
-        image_pt = image_preprocessor(images, 512).permute(0, 3, 1, 2).to(device)
-        input_image_tokens = latent_image_tokenizer(images=image_pt)
+        pipe_output = pipe(args.prompt, image=image.resize((512, 512)), num_inference_steps=20, image_guidance_scale=2)
+        latent_images = pipe_output.latents
+        edited_image = pipe_output.images[0]
+        edited_image.save(os.path.join(output_dir, str(i), f"edited_image.png"))
+        # image_pt = image_preprocessor(edited_image, 512).permute(0, 3, 1, 2).to(device)
+        # input_image_tokens = latent_image_tokenizer(images=image_pt).unsqueeze(1)
+        input_image_tokens = latent_image_tokenizer(latent_images = latent_images)
         scene_codes = model(input_image_tokens=input_image_tokens, device=device)
     timer.end("Running model")
 
