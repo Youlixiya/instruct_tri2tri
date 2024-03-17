@@ -35,7 +35,7 @@ class DINOLatentImageTokenizer(BaseModule):
         image_size: int = 64
         num_channels: int = 4
         patch_size: int = 2
-        num_hidden_layers: int = 2
+        num_hidden_layers: int = 12
 
     cfg: Config
 

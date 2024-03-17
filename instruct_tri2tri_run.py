@@ -182,7 +182,7 @@ for i, image in enumerate(images):
 
     timer.start("Running model")
     with torch.no_grad():
-        pipe_output = pipe(args.prompt, image=image.resize((512, 512)), num_inference_steps=20, image_guidance_scale=2)
+        pipe_output = pipe(args.prompt, image=image.resize((512, 512)), num_inference_steps=10, image_guidance_scale=2)
         latent_images = pipe_output.latents
         edited_image = pipe_output.images[0]
         edited_image.save(os.path.join(output_dir, str(i), f"edited_image.png"))

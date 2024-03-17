@@ -71,7 +71,7 @@ def parse_option():
 
     # learning process settings
     parser.add_argument('--optim', type=str, default='adamw', choices=['adam', 'sgd', 'adamw'])
-    parser.add_argument('--learning_rate', type=float, default=2e-4, help='learning rate')
+    parser.add_argument('--learning_rate', type=float, default=2e-3, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=0, help='weight decay')
     parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='gradient accumulation steps')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -178,10 +178,10 @@ if __name__ == "__main__":
             samples = len(images)
             image_pt = image_preprocessor(images, 512).permute(0, 3, 1, 2).to(device)
             with torch.no_grad():
-                target_tokens = image_tokenier(image_pt)
-            pred_tokens = model(image_pt)
+                target_tokens = image_tokenier(images=image_pt)
+            pred_tokens = model(images=image_pt).squeeze(1)
             dim = pred_tokens.shape[2]
-            loss = loss_fn(pred_tokens.permute(0, 1, 3, 2).reshape(-1, dim), target_tokens.permute(0, 1, 3, 2).reshape(-1, dim))
+            loss = loss_fn(pred_tokens.permute(0, 2, 1).reshape(-1, dim), target_tokens.permute(0, 2, 1).reshape(-1, dim))
             # loss = loss_fn(pred_tokens.reshape[:, index, :](-1, dim), target_tokens[:, index, :].reshape(-1, dim))
             accelerator.backward(loss)
             if batch_idx % args.gradient_accumulation_steps == 0:
